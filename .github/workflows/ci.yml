@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  rust:
+    name: Rust (tap_reader) — build & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: cargo build --release
+        working-directory: tap_reader
+        run: cargo build --release
+      - name: cargo test --release
+        working-directory: tap_reader
+        run: cargo test --release
+
+  python-syntax:
+    name: Python — syntax check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # This compiles every .py file to bytecode to catch syntax errors.
+      # It does NOT run the DiFR pipeline itself — several scripts need
+      # generated data artifacts (trained checkpoints, the training corpus)
+      # that aren't checked into the repo; see the README's Getting Started
+      # section for how to produce them locally before running those.
+      - name: Compile-check all Python files
+        run: python -m py_compile *.py
