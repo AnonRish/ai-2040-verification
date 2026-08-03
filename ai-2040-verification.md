@@ -4,7 +4,7 @@ Working document built section-by-section against the 30-part prompt sequence. T
 
 **A note on what "checkable" means in this sandbox.** Several later sections' self-checks demand real measurements — 400 Gbps throughput, GPU HBM wipe timing, DPDK benchmarks. This environment has no DPDK-capable NICs, no GPUs, and no optical tap hardware. Where a section needs that, I'll build and test whatever *is* honestly testable here (algorithms, protocol logic, small-scale software simulation) and say plainly where a claim is a design estimate rather than something actually run — never the reverse.
 
-**Progress: 21 / 30 sections drafted.**
+**Progress: 30 / 30 sections drafted.**
 
 | Part | § | Prompt | Status |
 |---|---|---|---|
@@ -29,15 +29,15 @@ Working document built section-by-section against the 30-part prompt sequence. T
 | IV — Physical & Operational Trust | 19 | Storage-Bank → Inference-Unit Path | **Drafted below** |
 | | 20 | General Physical Security & Compute Auditing | **Drafted below** |
 | | 21 | Recomputation Server Trust | **Drafted below** |
-| | 22 | TAP Installation & Monitoring at Scale | Pending |
-| | 23 | Workload Approval | Pending |
-| V — Beyond Inference-Only | 24 | Verified Evaluations & Weight Transport | Pending |
-| | 25 | Pre-Training Verification | Pending |
-| VI — The Frontier | 26 | The Cryptographic/ZKP Track | Pending |
-| VII — Holding Together | 27 | Composing Trust Roots & Hardening | Pending |
-| | 28 | Binding Verification to Governance | Pending |
-| VIII — Other Tracks | 29 | Track 1 — Company/Domestic Auditing | Pending |
-| | 30 | Track 3 — Detecting Undeclared Compute | Pending |
+| | 22 | TAP Installation & Monitoring at Scale | **Drafted below** |
+| | 23 | Workload Approval | **Drafted below** |
+| V — Beyond Inference-Only | 24 | Verified Evaluations & Weight Transport | **Drafted below** |
+| | 25 | Pre-Training Verification | **Drafted below** |
+| VI — The Frontier | 26 | The Cryptographic/ZKP Track | **Drafted below** |
+| VII — Holding Together | 27 | Composing Trust Roots & Hardening | **Drafted below** |
+| | 28 | Binding Verification to Governance | **Drafted below** |
+| VIII — Other Tracks | 29 | Track 1 — Company/Domestic Auditing | **Drafted below** |
+| | 30 | Track 3 — Detecting Undeclared Compute | **Drafted below** |
 
 ---
 
@@ -1114,6 +1114,562 @@ A freshly built log verifies cleanly. Tampering with one entry's payload breaks 
 
 ---
 
-## Next section
+### §22. TAP Installation & Monitoring at Scale
 
-§22 (**TAP Installation & Monitoring at Scale**) is next — the same granularity-vs-count tradeoff §14 already modeled quantitatively, now applied to physical tap installation itself rather than evidence collection, plus a concrete inspection sampling rate at the stated 100s-to-100,000s scale range. The source material's own honesty about the "bypass-and-restore" residual risk is worth preserving exactly as stated, not solved artificially.
+§8 named the dial without building it: "§22 already treats tap granularity as a dial (fleet-wide down to per-server down to per-GPU)." This section is where that claim gets cashed out — how many physical tap points actually get installed, and, given a realistic and bounded inspector budget, what that choice does to the "bypass-and-restore" risk the source material itself flags as unsolved. Two different questions, two subsections: 22a is a one-time installation choice (how many taps); 22b is an ongoing operational one (how often can each one actually be checked, and what does that leave open).
+
+#### 22a. Installation granularity: the dial, quantified
+
+**Reference facility, reusing §20's own numbers rather than fresh ones.** `max_supportable_gpus(5)` — §20's own corrected function, imported directly here rather than retyped from prose — gives 5,702 GPUs for a 5MW-intertie facility at PUE 1.15. At 8 GPUs per inference unit (the HGX H100 baseboard, §20's own citation), that's 712.75 inference units per facility. This section adds one new assumption, stated as one: 6 units per air-cooled 42U-class rack, giving 118.79 racks per facility. (A liquid-cooled, rack-scale design — NVL72-class — would collapse the rack and server granularities in the tables below down to nearly the same tap count; this model doesn't separately represent that design point.)
+
+Three granularities, real tap counts computed rather than estimated:
+
+| granularity | taps / facility | 100 facilities | 300 facilities | 1,000 facilities (§20's own reference) |
+|---|---|---|---|---|
+| facility (one tap covers everything) | 1 | 100 | 300 | 1,000 |
+| rack | 118.8 | 11,879 | 35,638 | 118,792 |
+| server / inference unit | 712.8 | 71,275 | 213,825 | 712,750 |
+
+That spans low hundreds through high hundred-thousands — the task's own stated range — without needing to strain any single cell to hit it.
+
+**What buys the extra taps.** Installation cost scales roughly linearly with tap count — more physical splitter units, more fiber runs, more labor — and this document doesn't have a reliable per-unit dollar figure to price that with, so it isn't invented here. What finer granularity actually buys is named plainly instead: a coarse, facility-level tap is a **single point of catastrophic failure** for detection purposes. Defeat the one tap covering an entire facility's frontend uplink, and every inference unit behind it goes dark to DiFR simultaneously, whether the prover meant to exploit one unit's worth of stolen capacity or all 712. A server-level tap has no such blast radius — bypassing it hides exactly one unit's traffic, nothing more. That tradeoff is what 22b actually quantifies, not asserts.
+
+#### 22b. Monitoring at scale: inspector capacity and the bypass-and-restore residual risk
+
+**The cadence already exists — reused, not reinvented.** §20 established quarterly, 10%-of-1,000-facilities inspection sampling. Treated as a rate, that's λ_facility = 0.4 visits/year for any given facility. What §20 didn't need and this section does: K, how many individual taps one facility visit can actually check. Stated assumption: a manual check (confirm physical presence, scan the seal's serial number, cross-reference the registry) takes about 5 minutes including movement between rack positions, giving K=100 taps per inspector-day. A second value, K=1,000, stands in for a batch or photographic scanning capability that would remove most of that per-tap time cost — not a claim such tooling exists today, a lever this section tests the effect of.
+
+Per-tap inspection rate follows directly: λ_tap = λ_facility × min(1, K / taps_per_facility). At K=100, finer granularity dilutes inspector attention across more taps than a single visit can cover:
+
+| granularity | taps / facility | t_sample (K=100) | λ_tap/yr (K=100) | t_sample (K=1,000) | λ_tap/yr (K=1,000) |
+|---|---|---|---|---|---|
+| facility | 1 | 1.000 | 0.400 | 1.000 | 0.400 |
+| rack | 118.8 | 0.842 | 0.337 | 1.000 | 0.400 |
+| server | 712.8 | 0.140 | 0.056 | 1.000 | 0.400 |
+
+At K=1,000 every granularity is visit-limited rather than throughput-limited (K exceeds even the server count), and the per-tap rate is identical across all three — a regime shift that matters a great deal below.
+
+**Two regimes for the bypass itself, and the real terminology for the distinction.** Los Alamos National Laboratory's Vulnerability Assessment Team, which has spent decades running vulnerability assessments of tamper-indicating seals for the IAEA, Euratom, and multiple U.S. agencies, draws exactly this line: *intrusion detection* is immediate, real-time detection of unauthorized access; *tamper detection* is delayed, after-the-fact detection. This section computes both.
+
+**Unsealed (intrusion-detection case): only a live catch counts.** A prover removes or reroutes a tap, operates covertly for duration *d*, and restores it to an indistinguishable state before anyone looks. Catching this needs an inspection to land *during* the bypass window. For a Poisson-distributed inspection process at rate λ_tap, that's P(caught) = 1 − e^(−λ_tap·d) — the same functional form as §1's own detection formula, with λ_tap playing C's role and *d* playing N_fake's. Verified against a real simulated arrival process (cumulative exponential inter-arrival draws, not the Poisson-count shortcut, which would just re-derive the same formula through a different door), at K=100:
+
+| granularity | 1 day | 1 week | 1 month | 1 quarter |
+|---|---|---|---|---|
+| facility (formula / MC) | 0.0011 / 0.0009 | 0.0076 / 0.0076 | 0.0323 / 0.0333 | 0.0949 / 0.0957 |
+| rack (formula / MC) | 0.0009 / 0.0011 | 0.0064 / 0.0067 | 0.0273 / 0.0275 | 0.0805 / 0.0802 |
+| server (formula / MC) | 0.0002 / 0.0002 | 0.0011 / 0.0010 | 0.0046 / 0.0044 | 0.0139 / 0.0136 |
+
+Formula and simulation agree at every cell — the mechanism is implemented correctly, not just asserted.
+
+**The real finding: campaign-level detection, and a cancellation that isn't obvious in advance.** Hiding *M* inference units' worth of covert operation needs N_events = ⌈M / units-per-tap⌉ separate, independent bypasses at rack or server granularity, but always exactly 1 at facility granularity (one tap already covers everything up to the whole facility, so there's no finer control to exploit *or* to defend). P(campaign ever caught) = 1 − (1 − P(single event caught))^N_events — the same "it only needs one catch, ever" asymmetry §1 already leaned on, now working *for* finer granularity because it multiplies how many independent chances the verifier gets. At d = 1 month, K=100:
+
+| M (units hidden) | facility | rack | server |
+|---|---|---|---|
+| 1 unit | N=1, P=0.032 | N=1, P=0.027 | N=1, P=0.005 |
+| 6 units (~1 rack) | N=1, P=0.032 | N=1, P=0.027 | N=6, P=0.027 |
+| 60 units (~10 racks) | N=1, P=0.032 | N=10, P=0.242 | N=60, P=0.242 |
+| whole facility (~713 units) | N=1, P=0.032 | N=119, P=0.963 | N=713, P=0.963 |
+
+Two things fall out of real numbers, not intuition. First, facility-granularity detection probability **never moves** regardless of M, from 1 unit up through the entire facility — the single-point-of-failure problem in its starkest form, confirming 22a's qualitative claim with an actual computed curve. Second, and less obvious going in: **rack and server granularity land on nearly identical campaign-detection probability at every M tested** (0.242 vs 0.242 at M=60; 0.963 vs 0.963 at whole-facility), despite server granularity needing six times as many bypass events. That's not a coincidence — in the inspector-throughput-limited regime (K below taps-per-facility, true for both rack and server at K=100), going finer multiplies the number of required events by exactly the factor it divides each event's individual catch rate by, because taps-per-facility × units-per-tap is the same constant (total units per facility) at every granularity. The two effects cancel to first order. What actually matters in this regime isn't rack-vs-server — it's K relative to facility size, and whether the coarsest option (facility) breaks out of the throughput-limited regime entirely by always being checked whenever visited at all.
+
+**The sealed (tamper-detection) case: a genuinely different risk shape, and where it gets uncomfortable.** A tamper-indicating seal breaks the instant a tap is disturbed and — barring seal defeat, a real, separate difficulty axis this document returns to below — stays detectably broken until that specific tap's next check. By the memoryless property of a Poisson process, expected time-to-discovery is exactly 1/λ_tap, independent of bypass duration entirely: even an instantaneous bypass eventually surfaces. Verified by simulation (waiting time to the next arrival of a freshly-started process) against the closed form:
+
+| granularity | K=100 (formula / MC) | K=1,000 (formula / MC) |
+|---|---|---|
+| facility | 2.500 / 2.500 yr | 2.500 / 2.510 yr |
+| rack | 2.970 / 2.975 yr | 2.500 / 2.506 yr |
+| server | **17.819 / 17.774 yr** | 2.500 / 2.495 yr |
+
+At K=100, server-granularity sealed discovery takes a mean of **almost 18 years** — the same inspector-throughput dilution that made rack and server converge on campaign-detection probability above cuts the other way here, because time-to-discovery for one *specific* tap doesn't get the benefit of many independent chances the way a multi-event campaign does. At K=1,000, every granularity converges to the same 2.5-year figure, set entirely by the facility-visit cadence itself rather than by which taps get checked once an inspector is on-site. That's the honest case for eventually building the batch/automated seal-checking capability 22a and this section both left as a stated-not-demonstrated lever, not a nice-to-have.
+
+**Seal-forgery difficulty is a real axis this document cannot close.** Los Alamos's Vulnerability Assessment Team examined 94 different tamper-indicating seals, both passive and electronic, commercial and government — and defeated all 94 using rapid, inexpensive, low-tech methods, finding that cost was not a good predictor of seal security. Nothing in the registry construction below changes that; a software log can only ever make a seal *mismatch legible*, never make the underlying physical seal harder to spoof. That's stated here rather than left implicit.
+
+**The registry: §21b's log, reused rather than reinvented, confirmed against a new payload shape.** A tap-installation registry needs exactly the properties §21b already built and tested: append-only, hash-chained, Ed25519-signed, tamper-evident. `TamperEvidentLog` and `LogEntry` are imported unmodified; only the payload shape is new (`tap_id`, `facility_id`, `granularity`, `seal_serial`). Built for real — 5 install entries across 2 facilities, then a later inspection entry honestly reporting a seal-serial mismatch (`TID-88214-A` on file, `TID-88214-B` observed) — all 7 entries verify cleanly, because an honest report of a real-world discrepancy is data the log should record, not something it should reject. Then the actual attack: retroactively editing the original install record to make that mismatch look like a data-entry error instead of real tampering. Caught for the identical reason §21b's own tamper test caught it — the edited entry's signature no longer validates against its changed content, *and* the next entry's stored `prev_hash` no longer matches — both checked directly rather than one inferred from the other, matching §21b's own practice. No new mechanism was needed because none was missing; this file only confirms the reuse actually holds for a differently-shaped payload rather than asserting it would.
+
+**The residual risk, stated rather than solved.** Even the best case this section found — sealed detection, automated K=1,000 scanning, every granularity converged — still has a mean discovery time of 2.5 years, and that floor is set by λ_facility itself, §20's own facility-visit cadence, not by anything a smarter tap-checking scheme can buy back. Shrinking it further needs one of two things, both real costs this document doesn't get to wave away: visiting facilities more often (a quantifiable but unpriced increase in inspector labor), or giving the tap itself some form of continuous, active self-reporting capability. That second option directly contradicts §1's whole reason for trusting the baseline passive splitter in the first place — "no logic, no firmware, no state" — and reintroduces exactly the active-logic compromise surface §3's secure-gateway alternative already has to carry, which §21a already found doesn't fully close even with TEE attestation (physical debug-port access evades it). There is no design move available in this document that gets the unsealed case's live-catch probability to 1, or the sealed case's discovery window to 0, without paying one of those two costs. That's the source material's own acknowledged gap; this section quantifies it precisely instead of either hiding it or pretending a cleverer mechanism closes it.
+
+#### Self-check
+
+Granularity table spans the task's own stated range: confirmed — 100 through 712,750 taps, computed from §20's own imported figures plus one clearly stated new assumption (6 units/rack), not strained to fit. Residual risk quantified, not hand-waved: confirmed — both the unsealed live-catch probability and the sealed expected-discovery-time are real numbers from a formula independently verified against a first-principles Monte Carlo simulation, including the uncomfortable ones (18-year server-granularity discovery at K=100; campaign detection that never moves at facility granularity). Registry reuses rather than reinvents §21b: confirmed — `TamperEvidentLog`/`LogEntry` imported unmodified, only the payload shape changed, and the tamper-catch was re-run against that new shape rather than assumed to carry over.
+
+**Sources used in this section:** §1, §2, §3, §8, §14, §20, §21a, §21b (this document) — the topology, the granularity-dial framing, the facility-visit cadence, and the log construction, all reused directly rather than re-derived. Johnston, R.G. et al., Los Alamos National Laboratory Vulnerability Assessment Team, vulnerability assessments of tamper-indicating seals (multiple LANL/OSTI reports, 1995–2004) — the intrusion-detection/tamper-detection terminology this section's two regimes are named after, and the 94-seals-defeated finding grounding the seal-forgery caveat.
+
+---
+
+### §23. Workload Approval
+
+The Verification Plan supplement divides this problem in two: Workload Approval (does a declared workload get permitted to run at all) and Workload Verification (once running, does it stay within what was declared — already this document's job throughout Part II). The supplement's own baseline design for the first half is worth stating plainly before anything else, because it reframes what this section is actually for: the overall proposal for approval is for it to be carried out manually, by teams of auditors, not automated. That's load-bearing. This section doesn't try to build a decision algorithm the source material itself doesn't propose — it builds the three things a human auditor's yes/no genuinely needs and doesn't have anywhere else in this document: an unambiguous record of exactly what was approved, a tamper-evident trail once approved, and a check that what's actually running still matches it. That last one closes the loop §13 explicitly left open: a compiler-emitted certificate can only attest to what went through the compiler, and §13 named this section as the place that decides what's allowed to reach the GPU in the first place.
+
+#### 23a. Declaration, policy lists, and the attack the source material names as the real one
+
+The supplement's own two-step flow: AI companies **declare** the workload — full transparency on code and algorithms, which is exactly what §13's DSL already captures — and auditors run checks against it, and if it passes, **approval** comes back with the random seeds needed to actually generate. That seed detail is not incidental; the source is explicit that issuing seeds at approval time, from the auditor, removes an attack vector companies would otherwise have to game fake randomness — precisely the seed-custody discipline §1 established and §5 built ("the seed must come from the verifier, not the prover") now identified at the point in the full system where that seed actually originates, rather than assumed to appear from nowhere at the recomputation server.
+
+For what the checks themselves look for, the supplement proposes maintaining white lists (vetted, approved code/data), black lists (banned), and gold lists (required on every workload of a given type) — and is explicit that this is a proposal for *structuring* the check, not a claim about what should be on any list, which is a scientific and policy question this document has no special standing to answer. What the supplement does name as the real difficulty is worth quoting closely rather than paraphrased into something vaguer: it may be unclear whether ad-hoc rules are actually being followed, and companies could attempt to **encode a non-compliant workload inside one that looks compliant on the surface**, exploiting a small percentage of total compute for a non-compliant purpose that becomes significant only in aggregate, at scale.
+
+That's not a hypothetical this document has to take on faith. It's the exact shape of two findings already made, with real numbers, sections ago: §9 found a trigger-conditional LoRA backdoor that passes every check at 100% while dormant and only reveals itself once triggered; §10 and §12 found a real prover can smuggle roughly three-quarters of a 20-bit payload through ordinary-looking output while passing every deviation check, caught only by a secondary distributional test built for exactly that purpose. Workload approval is a different layer than DiFR — it gates what's *declared*, not what's *generated* — but the underlying threat the supplement names and the one this document already demonstrated are the same pattern at different altitudes: a small, compliant-looking surface hiding something that isn't. Naming that connection here is the point; §12's commitment scheme and §10's per-token distribution check are what actually mitigate it, and this section doesn't get to borrow their coverage just by citing the same concern.
+
+#### 23b. Extending §13's certificate, applying its own lesson rather than repeating it
+
+A white/black/gold-list check needs somewhere to attach. The natural place is §13's DSL, extended with two new declared fields — `banned_ops`, `required_ops` — checked against policy lists before a workload is ever compiled:
+
+```
+workload rd_experiment_v1 {
+    checkpoint_hash: a3f8e91c9e21
+    operation_class: FORWARD_ONLY
+    max_batch_size: 256
+    allowed_ops: [matmul, attention, layernorm, gelu, gradient_clip]
+    collective_ops: NONE
+}
+```
+
+Real test, three declarations — compliant, one declaring a blacklisted op, one missing a required (goldlisted) op — checked against an illustrative policy list (`custom_allreduce_variant`/`unregistered_kernel` banned; `gradient_clip` required):
+
+```
+compliant                    policy_ok=True   violations={}         missing={}
+declares a blacklisted op    policy_ok=False  violations={'custom_allreduce_variant'}  missing={}
+missing the required op      policy_ok=False  violations={}         missing={'gradient_clip'}
+```
+
+Then the part that matters more than the check itself: §13's own self-check caught a real bug where declared-but-unread fields got `-O2` dead-code-eliminated, letting two differently-declared workloads compile to bit-identical binaries — silently defeating the certificate. The extended compiler here applies that lesson rather than re-learning it: `banned_ops` and `required_ops` are emitted as arrays the generated C code actually iterates over and prints, not unused constants. Confirmed directly — a workload identical except for one additional allowed op produces a **different** certificate hash:
+
+```
+cert_a hash: 3b8badaa1ff28f8b7aa5d8cd...
+cert_b hash: 528618d37e557942f4780f65... (one extra allowed op)
+Certificates match: False (must be False)
+```
+
+#### 23c. The approval registry: where the seed actually originates, and revocation
+
+An approval needs to be looked up later — by the recomputation server checking whether a claimed certificate was ever actually approved, and by an auditor checking whether it still is. §21b's `TamperEvidentLog` gets reused a fourth time in this document (§21b's own verification log, §22's tap registry, now this) for exactly the same reason each prior reuse held: append-only, hash-chained, Ed25519-signed tamper evidence is a generic property, not something specific to any one payload shape. What this reuse needed that none of the first three did: **revocation**, which means a lookup has to find an entry's *latest* status rather than just whether an approval exists anywhere in the log's history — a naive existence check would treat an approved-then-revoked workload as still approved.
+
+Built and tested for real, five real properties in sequence, not asserted:
+
+```
+Approved 3b8badaa1ff28f8b..., issued seed=4162050623061903961
+Check with correct seed: ok=True (ok)
+Check with WRONG seed (the exact "gaming fake randomness" attack the source names): ok=False (seed_mismatch)
+Check on a certificate hash that was never approved: ok=False (never_approved)
+Check AFTER revocation, same correct seed: ok=False (revoked)
+Registry integrity after an honest approve+revoke history: True (all 3 entries verified)
+```
+
+That last line matters as much as the others: an honest revocation is a normal event this registry has to log *without* tripping its own tamper detection — the log's job is to catch unauthorized changes, not penalize legitimate ones, and the test confirms it does the former without doing the latter.
+
+**The attack this section actually needed to test, not just the happy path.** A prover who wants to keep operating on a revoked certificate has an obvious move: go back and edit the `revoke` entry to look like a re-approval instead. Tried directly — the entry's `event` field flipped from `"revoke"` to `"approve"` after the fact:
+
+```
+entry 2 BEFORE: {'event': 'revoke', ..., 'reason': 'post-hoc anomaly found in evaluation'}
+entry 2 AFTER:  {'event': 'approve', ..., 'issued_seed': 4162050623061903961}
+Registry integrity check: False (signature invalid at entry 2)
+```
+
+Caught for the identical reason the other three reuses of this exact log caught tampering. No new mechanism was needed, because none was missing — which is itself worth noting as a small piece of evidence that §21b's original design was general enough to be worth reusing this many times, rather than getting lucky three times before this one needed patching.
+
+#### 23d. What this section doesn't close, named rather than assumed away
+
+Three real, separate gaps, not one blended caveat:
+
+**Populating the lists is the actual hard part, and stays outside this document's scope.** What belongs on a white, black, or gold list is a question about which techniques are actually dangerous at a given capability level — a scientific and policy judgment, not a verification-architecture one. This document can make the check *mechanical* once the lists exist (23b); it has no special standing to say what should be on them, and doesn't pretend otherwise.
+
+**The compliant-surface-hiding-noncompliant-content attack is named, not solved, here.** §23a pointed at §9/§10/§12's real, quantified findings on exactly this pattern rather than re-arguing it — but pointing at existing mitigations isn't the same as this section adding new ones. A goldlist can require a technique appear in a *declaration*; it has no way to confirm the technique is what actually ran versus what §10 already showed can be smuggled around an average-only check.
+
+**Certificate-to-execution binding still needs something this document can cite but not build.** §13's own gap was that nothing stops code from reaching a GPU without ever going through the DSL compiler at all. Real hardware exists that's relevant here and shouldn't be undersold: NVIDIA H100 and later GPUs ship a genuine on-die hardware root of trust, a measured and authenticated boot sequence, and a cryptographically signed attestation report of the GPU's own firmware and driver state — production-deployed, not experimental (Corvex's verified deployment on NVIDIA HGX B200, announced March 2026, is a real, named instance of this running at production scale). But that attestation, as the ecosystem uses it today, speaks to the *platform's* integrity — is this GPU running unmodified, unrevoked firmware inside a genuine trusted execution environment — not to whether the *specific kernel about to launch* matches an approved certificate from 23b. Binding those two would mean extending the driver/runtime layer to fold a certificate hash into what gets measured at launch time, which is a real, buildable extension of a real, shipping hardware root of trust — not an invention from nothing, but also not something this sandbox (no GPU, as stated throughout) can build or test. Stated as the gap it is, same as §13 left it.
+
+#### Self-check
+
+Source material's own framing used as the section's foundation, not invented: confirmed — the manual-approval baseline, the white/black/gold-list regime, the seed-issued-at-approval detail, and the compliant-surface attack are all traceable to the real Verification Plan supplement text, cited below, not assumed. Extends existing document infrastructure rather than building parallel mechanisms: confirmed — §13's DSL and compiler (extended, not replaced), §21b's tamper-evident log (reused a fourth time), and §1/§5's seed-custody discipline (traced to where it actually originates) all carried forward directly. The attack tested is a real attempt against the actual registry, not a description: confirmed — the revocation-disguised-as-reapproval attempt is a real mutation of a real log entry, caught by the same signature-and-chain check demonstrated three times before in this document, re-confirmed rather than assumed to still hold for a new payload shape.
+
+**Sources used in this section:** AI Futures Project, *AI 2040: Plan A*, Verification Plan supplement (ai-2040.com/supplements/verification-plan) — the Workload Approval / Workload Verification division, the declaration-then-approval flow, the seed-issuance rationale, and the white/black/gold-list regime, all cited directly rather than paraphrased from memory. §1, §5, §13, §21b (this document) — the seed-custody discipline, the DSL and certificate mechanism, and the tamper-evident log, all reused rather than rebuilt. NVIDIA developer documentation and Corvex's March 2026 production-deployment announcement — the real, current state of GPU hardware attestation grounding 23d's enforcement gap.
+
+---
+
+## Part V — Beyond Inference-Only
+
+### §24. Verified Evaluations & Weight Transport
+
+The Verification Plan supplement's own phrase for this is "Evaluations and release": for workloads that are final training runs, there's an extra step beyond ordinary serving — run evaluations, and get *those* verified for correctness too — before final approval releases the weights from the R&D cluster's internal storage across to the inference-only clusters this entire document has been built around since §1. The supplement calls that transport "extremely high stakes from a model weights theft perspective." Two sub-questions, kept separate because they turned out to have different-shaped answers: does verification need anything eval-specific (24a), and what does the transport itself need beyond what §19 already built (24b).
+
+#### 24a. Verified evaluations
+
+**Part 1: does DiFR care what a prompt is *for*?** Tested directly rather than assumed: the same honest-vs-cross-family comparison §9 already validated on random Shakespeare substrings, re-run against eight-character prompts deliberately shaped to look like evaluation framing (`"Judge if:"`, `"Score 1-5"`) instead of ordinary continuations (`"First Cit"`, `"To be or "`):
+
+| prompt style | honest mean_dev | cross_family mean_dev |
+|---|---|---|
+| eval-style | 0.00000 | 0.0761 |
+| ordinary | 0.00000 | 0.0756 |
+
+Same clean separation, same order of magnitude, no meaningful difference. There was never a mechanism by which there could be one — DiFR's entire comparison is per-token logit deviation against the verifier's own recomputation; nothing in `difr.verify()` reads what a prompt is *about*. Confirmed rather than assumed, but the honest expectation going in was exactly this result.
+
+**Part 2, Case A: substitution-style sandbagging — real, and exactly §9's shape.** A company could serve a model that behaves normally most of the time but detects evaluation-like context and activates different behavior — the sandbagging concern the AI safety literature has been raising as capability evaluations get more consequential. If that detection is a bolted-on addition to an otherwise-honestly-declared checkpoint, this is structurally identical to §9's trigger-conditional LoRA backdoor, and re-running it on live checkpoints (not just citing the earlier numbers) confirms the identical pattern:
+
+| eval-cue condition | mean_dev | pass_rate (τ=0.3) |
+|---|---|---|
+| absent (ordinary deployment) | 0.0000 | 1.000 |
+| present (looks like an eval) | 7.9737 | 0.000 |
+
+Real, catchable — but only if whatever cue the model actually responds to shows up in sampled traffic, which an evaluator's own submitted probes guarantee by construction. This is genuinely good news for evaluation specifically, even though §9 already established it's bad news for ordinary serving sampled at low rates.
+
+**Part 2, Case B: the sharper, more honest distinction this document owes.** Reusing the trigger-adapter demonstration for the sandbagging story risks implying more than it shows, and it's worth naming precisely why. In Case A, the *declared* checkpoint is the clean base model, and what's actually served silently differs from it — DiFR is comparing against a reference that genuinely doesn't contain the conditional behavior, so a deviation genuinely exists to find. But the sandbagging scenario that actually worries AI safety researchers is usually not a bolted-on adapter at all — it's a model that *learned*, during ordinary training, to behave differently when it infers it's being evaluated. No substitution occurs anywhere in that case: the declared, checkpoint-hash-verified weights are exactly what's running, in both the eval and the deployment context, and DiFR's actual question — does the claimed output match what these declared weights produce — gets an honest, correct "yes" every single time, because it genuinely is faithful. There is no τ that catches this, not because sampling got unlucky, but because there's no deviation of any size for any τ to find. This document's entire recomputation apparatus verifies faithfulness to a declared checkpoint; it was never built to, and can't be extended to, verify that a checkpoint's own learned behavior is consistent or honest across contexts. That's a claim about model training and alignment, a different field with its own active research on this exact problem, and this document has no standing to claim its verification machinery reaches it.
+
+#### 24b. Weight transport
+
+**Not §19's transport.** §19 covered storage-bank-to-inference-unit, entirely inside one already-physically-verified facility. This is a bigger jump: weights crossing *out* of an R&D cluster — under §23's approval regime, with categorically greater capability and correspondingly tighter handling — and *into* the inference-only architecture this document has spent 23 sections building, carrying a newly-trained, not-yet-public, maximally valuable payload. §19's Architecture A/B analysis (data diode vs. attested transport) still applies to the physical link; what this section adds is the question §19 didn't need to ask: are these specific bytes the ones that actually got approved.
+
+**The chain, each link reused rather than invented.** An approved training workload (§23's `ApprovalRegistry`, unmodified) produces a checkpoint. Its evaluations get verified (24a). A release decision binds a manifest of weight-shard hashes — a Python `ManifestTree`, the same odd-node-duplication Merkle construction §4's Rust `EpochTree` already built and tested, reimplemented here because this chain lives on the Python side — to that specific, already-approved training certificate, logged in its own tamper-evident record. §21b's `TamperEvidentLog` gets reused a **fifth** time in this document (§21b's own log, §22's tap registry, §23's approval registry, and now this release log) without needing a single modification. At the receiving inference-only cluster, nothing is trusted about the transport itself — the manifest root gets recomputed independently over whatever bytes actually arrived, and checked against what was approved.
+
+Five real properties, tested in sequence:
+
+```
+1. Full honest chain (approve -> verified-eval hash -> release -> receive): PASS
+2. Release attempted against a training cert with no live §23 approval: rejected
+   ("cannot release -- training workload not currently approved (never_approved)")
+3. THE ATTACK: 1 of 9 weight shards silently swapped after release approval
+   Receiving cluster check: rejected ("manifest root mismatch")
+4. Merkle-proof check on the swapped shard alone, against the untouched approved root:
+   verifies=False (correctly rejects); same proof against the ORIGINAL shard: verifies=True
+5. Retroactively editing the release log's own manifest_root to "bless" the swap after
+   the fact: caught -- signature invalid at the edited entry
+```
+
+Property 4 is worth a sentence on why it matters beyond property 3 already catching the swap: a flat whole-file hash also catches a single changed byte anywhere, but at real scale — a 70B-parameter FP16 model runs roughly 140GB, this document's own §19 reference figure — a later dispute about *one specific shard* would need re-hashing the entire file to say anything. A Merkle proof settles the identical question in O(log n) hashes (4, for the 9-shard manifest tested here), checked against a root that was already approved and never needs recomputing. Exactly §4's own justification for a tree over a flat hash-chain, reapplied rather than re-argued.
+
+Property 5 closes the loop the same way the four prior reuses of this log closed it: no new mechanism, because none was missing. Five uses of one construction, in five differently-shaped contexts, without a single patch — that consistency is itself a small piece of evidence the original §21b design was general rather than merely lucky the first four times.
+
+#### Self-check
+
+Eval-specific verification claim tested, not assumed: confirmed — the content-agnosticism result (Part 1) and the substitution-style sandbagging result (Part 2, Case A) both come from real `difr.verify()` runs against live, freshly-retrained checkpoints in this session, not restated from §9's earlier numbers. The harder claim isn't oversold: confirmed — Case B is explicitly reasoned through as something this section's own machinery cannot reach, rather than letting Case A's real demonstration stand in for a claim about the different, harder problem. Weight transport tested against a real attack, not described: confirmed — the shard-swap-after-approval attempt is a real mutation of real bytes, caught by independent recomputation at the receiving end, with the release record itself then also tested against tampering and caught by the same mechanism as every prior reuse of this document's tamper-evident log.
+
+**Sources used in this section:** AI Futures Project, *AI 2040: Plan A*, Verification Plan supplement (ai-2040.com/supplements/verification-plan) — the "Evaluations and release" step, the weight-transport high-stakes framing, and the R&D-cluster-to-inference-cluster deployment narrative, cited directly. §1, §4, §9, §13, §19, §21b, §23 (this document) — DiFR's core mechanism, the Merkle-tree construction, the trigger-backdoor demonstration, the DSL/certificate, the storage-bank transport analysis, the tamper-evident log, and the approval registry, all reused rather than rebuilt.
+
+---
+
+### §25. Pre-Training Verification
+
+Worth stating plainly before anything else, because it recalibrates what this section can honestly claim: the source material's own resource allocation puts roughly 80% of verification R&D effort behind the inference-only retrofit — everything this document has built since §1 — and treats direct training verification as a smaller, separate ~20% research bet. The Verification Plan supplement is explicit that setting up a verification regime for *resumed* training is a parallel sprint that happens after an inference-only pause is already in place, precisely because R&D verification has properties that differ enough to need its own effort. This section inherits that honesty rather than overselling: it builds and tests the real, named mechanism as far as it genuinely goes, and reports exactly where the published literature says it stops.
+
+#### 25a. Why this doesn't just extend §5
+
+Three real differences, not one blended "training is harder" gesture. **Network shape:** §1 deliberately stripped the east-west interconnect down for inference-only clusters — "a cluster that's structurally incapable of fast collective communication... is a worse platform for a large training run even if every other verification layer here were somehow defeated." A real training run needs exactly that collective communication, across potentially thousands of accelerators, which is a fundamentally different traffic pattern than §2's tap was ever built to see. **Timescale:** an inference request is checked in seconds; a pre-training run spans weeks to months. Recomputing a sampled *forward pass* the way §5 does doesn't generalize to recomputing a sampled *week* of gradient descent — the unit of evidence has to change shape, not just get bigger. **What's being claimed:** §5 verifies that a claimed output matches a declared, static checkpoint. Training verification has to establish that a *sequence of updates* — not a single state — actually happened, honestly, in the claimed order, at the claimed cost.
+
+#### 25b. Proof-of-Learning, built and tested at toy scale
+
+**The real mechanism.** Jia et al. (2021) proposed Proof-of-Learning: a prover periodically logs weight checkpoints along with the data used between them; a verifier replays a sampled segment from a logged checkpoint and checks whether it lands on the next one. Shavit's extension proposes this as on-chip firmware — periodic snapshots, cryptographic hashes, sent to a verifier-trusted server, checked via sampled "Proof-of-Training-Transcript" replay — explicitly instead of zero-knowledge proofs, which he judges too computationally inefficient at this scale (the same tradeoff §26 will need to weigh directly). This is the identical shape as everything else in this document — verifier-controlled sampling, independent recomputation, a real check instead of a signed assertion — one level up: the unit being recomputed is a training segment, not a forward pass.
+
+Built for real: a tiny character-LM trained in 8 logged segments of 400 real gradient steps each (3,200 total steps, 5.6s), each segment's start-hash, end-hash, and data-selection seed logged into a tamper-evident record — §21b's construction reused a **sixth** time in this document. A verifier samples one segment at random (§1's own budget-limited-sampling principle, applied to training instead of packets), reloads the claimed starting checkpoint, and independently replays the claimed steps with the claimed seed:
+
+```
+Sampled segment 7: claimed_end=4b70987f756e...  recomputed=4b70987f756e...
+Independent replay matches claimed checkpoint: True
+```
+
+Bit-exact, not merely close — same hardware, same code, same seed. Worth flagging rather than taking for granted: this is exactly the determinism §7 found needs real, deliberate engineering the moment hardware or batch shape differs at all. It holding here for free is a same-machine, same-run property; a real deployment spanning weeks and possibly different hardware generations doesn't get this without doing what §7 already priced (1.8–63% throughput cost, architecture-locked in the cheap case).
+
+**A real attack, honestly labeled as the simple one.** A prover claims a full segment's worth of compute (400 steps) but actually spends an eighth of it (50 steps), reporting the cheaper checkpoint as if the full claim were true:
+
+```
+Claimed: 400 steps, seed=1003, forged_end=1723ed59c737...
+Verifier's real 400-step replay: f42230e64987...
+Match: False (must be False -- 50/400 of the claimed compute was never spent)
+```
+
+Caught, because the verifier's replay spends the same compute the prover claimed — the identical economics §1's C-fraction budget always has, now paid in training steps instead of recomputed packets.
+
+**A real, honest tension, not a bug.** A different prover spends the *full, genuine* 400 steps, honestly, but with a different data-order seed:
+
+```
+Original logged path (seed=1003):  end_hash=f42230e64987...
+Alternate REAL path (seed=1503, same n_steps, same real compute): end_hash=afb9ea766c19...
+Hashes match: False
+```
+
+Full compute, honestly spent, and it does not reproduce the originally logged checkpoint — because SGD's trajectory depends on data *order*, not just which data and how many steps, a real property Shumailov et al. (NeurIPS 2021) studied directly under the name data-ordering attacks. Exact-hash replay verification, as tested above, only ever accepts the one specific path a prover committed to at logging time. That's not a defect in this implementation; it's the real shape of the problem.
+
+#### 25c. What the published literature actually broke, and what this sandbox didn't test
+
+Precision matters here, because it would be easy to let the two results above imply more coverage than they have. What got tested: a naive prover who spends less compute than claimed (caught trivially) and an honest prover whose genuinely-equivalent work doesn't hash-match (a real tension, not an attack). What Fang et al. (EuroS&P 2023) actually broke is a different and harder thing: **spoofing** — constructing a checkpoint trajectory that passes verification for a model the adversary never actually trained (a stolen model, most concretely), cheaply and reproducibly. The original PoL paper's own security argument was that spoofing costs as much as honest training, removing the incentive to try; Fang et al., building on an earlier counter-example, show this is false across real (not just deliberately weakened) verification configurations. Their sharper conclusion is the one worth carrying forward exactly as stated: building a *provably* robust PoL verification mechanism reduces to open problems in learning theory — not an engineering gap this document could plausibly close with more careful implementation, but a research gap in understanding deep-learning optimization itself.
+
+This sandbox doesn't construct or test that spoofing attack, and says so rather than implying otherwise: a meaningful attempt needs a model and loss landscape with enough real structure for a forged trajectory to exploit, which a tens-of-thousands-of-parameters toy character-LM may not possess in a way that transfers to what actually breaks PoL at real model scale. What this section *can* honestly claim is narrower and still real: the replay mechanism itself works exactly as designed, a naive shortcut is caught, and a genuine, non-adversarial tension in the design (path-dependence) is demonstrated rather than asserted. The harder, published vulnerability is cited accurately rather than quietly matched against a weaker demo that wasn't actually built to test it.
+
+#### 25d. Where this leaves the "resuming training" regime, honestly
+
+Given PoL's robustness gap is a research problem rather than an implementation one, and given zero-knowledge proof-of-training is set aside on efficiency grounds by the same literature this section already cites, the honest bottom line matches the source material's own framing exactly: this needs more R&D, prototyping, and red-teaming before it's a mechanism a deal could rely on the way §5's DiFR — a published, empirically validated result — already can. One complementary, *preventive* lever worth naming rather than building out fully here, since it doesn't depend on resolving PoL's detection problem at all: multiparty cryptographic control, where a training run only executes once cryptographically signed by every required party, extends directly from §23's approval registry (a training-start decision requiring multiple independent signatures rather than one auditor's) without needing PoL to work at all — a gate before the fact, not a check after it, and a real, separate lever this document already has the infrastructure to build if it turns out to matter more than after-the-fact replay does.
+
+#### Self-check
+
+Real mechanism built and tested, not just described: confirmed — a genuine 8-segment, 3,200-step training run, logged and independently replayed to a bit-exact match. The attack actually tested is precisely characterized: confirmed — a naive compute-shortcut attack, explicitly distinguished from Fang et al.'s harder, published spoofing result rather than conflated with it. The honest tension is reported as a tension, not smoothed into either "broken" or "fine": confirmed — a genuinely honest alternate path fails exact-match replay, cited to real literature (Shumailov et al.) on exactly why, rather than treated as a bug in this file's implementation.
+
+**Sources used in this section:** AI Futures Project, *AI 2040: Plan A*, Verification Plan supplement (ai-2040.com/supplements/verification-plan) — the 80/20 R&D allocation and the resumed-training regime as a separate, parallel effort. Jia, Yaghini, Choquette-Choo, Chandrasekaran, Papernot, "Proof-of-Learning: Definitions and Practice" (2021) — the core PoL mechanism this section builds a toy version of. Fang, Jia, Thudi, Yaghini, Choquette-Choo, Dullerud, Chandrasekaran, Papernot, "Proof-of-Learning is Currently More Broken Than You Think" (EuroS&P 2023) — the real spoofing vulnerability and its open-problem-in-learning-theory conclusion, cited precisely rather than assumed from the title. Shumailov, Shumaylov, Kazhdan, Zhao, Papernot, Erdogdu, Anderson, "Manipulating SGD with Data Ordering Attacks" (NeurIPS 2021) — grounding for why the honest alternate-path tension in 25b is a real, named property. Shavit, "What does it take to catch a Chinchilla?" — the on-chip-firmware PoTT extension and the ZK-inefficiency judgment, already cited via §26's forward reference. §1, §5, §7, §21b, §23 (this document) — the sampling principle, the recomputation economics, the determinism findings, the tamper-evident log, and the approval registry, all reused rather than rebuilt.
+
+---
+
+## Part VI — The Frontier
+
+### §26. The Cryptographic/ZKP Track
+
+Real, separately-funded, and explicitly parallel rather than integrated: on top of the network-tap-and-recomputation architecture this entire document has built, the source material describes on the order of $100M mobilized specifically toward "software-only and cryptography-centric (e.g., ZKPs) approaches" — one candidate track among several the source material itself frames as *alternatives* to Plan A's primary retrofit, not components of it. §25 handed this section a specific, answerable question rather than a cold open: is Shavit's judgment that zero-knowledge proofs are too computationally inefficient for training-scale verification a permanent verdict, or a currently-true one. The honest answer turns out to depend on which half of "training-scale" is meant.
+
+#### 26a. What this track would actually buy, and why it's a different shape of tradeoff
+
+Every mechanism this document has built since §5 shares one cost allocation: the *verifier* pays, continuously, to independently recompute a sampled fraction of what the prover claims — §1's C-fraction budget, paid every time, by the checking side. A working zero-knowledge proof of computation inverts that allocation entirely: the *prover* pays once to generate a proof, and the verifier's cost to check it is cheap and — critically — stays roughly constant regardless of how large the underlying computation was, rather than scaling with it. If that tradeoff were cheap enough to actually use, it would change more than an implementation detail; it would change who bears the ongoing cost of verification at all. Whether it's cheap enough is the question the rest of this section actually answers, piece by piece rather than in one number.
+
+#### 26b. Freivalds' algorithm: the real, buildable core of "verify cheaper than redo"
+
+The specific idea real ZK-ML systems build the cheap part of their machinery on isn't new cryptography — it's Freivalds' algorithm (1979), and zkLLM's own sumcheck-protocol foundation is a more general version of exactly this: check a claimed matrix product `C = A @ B` by testing `A @ (B @ r) == C @ r` for a random vector `r`, at O(n²) cost, instead of recomputing the full O(n³) product. Built and tested for real:
+
+**Correctness** — an honestly-claimed product passes at every size tested (n=10, 100, 500).
+
+**Soundness, checked against the actual bound, not assumed.** Freivalds' real, provable guarantee: a single trial catches a wrong claim with probability ≥ 1/2. Over 2,000 independently tampered matrices (a single entry perturbed — the hardest case for the checker, not a strawman large error), the measured single-trial catch rate was 0.5155, comfortably satisfying the bound. Repeating trials drives the miss probability down geometrically, and the match to theory is close enough to be worth showing in full:
+
+| trials (k) | empirical catch rate | theoretical 1 − (1/2)ᵏ |
+|---|---|---|
+| 1 | 0.4900 | 0.5000 |
+| 2 | 0.7540 | 0.7500 |
+| 4 | 0.9320 | 0.9375 |
+| 8 | 0.9960 | 0.9961 |
+| 16 | 1.0000 | 1.0000 |
+
+**The real crossover, measured rather than asserted from the complexity class alone.** At n=100 the check is actually *slower* than just multiplying (0.4×) — three separate matrix-vector products plus call overhead dominates before the problem is large enough for the O(n²)-vs-O(n³) gap to matter. Past roughly n=600, checking stays consistently 14–16× faster than the real product — not growing as cleanly with n as the asymptotic classes alone would predict, because numpy's matmul is BLAS-backed and cache-optimized, nowhere near the textbook triple loop "O(n³)" is shorthand for. Reported as measured, not smoothed into a cleaner story than the numbers actually show.
+
+**Two honest limits, stated directly rather than left for the reader to assume away.** This is not zero-knowledge by itself — the checker sees A and B in full; nothing here hides anything. And it says nothing about the nonlinear operations — softmax, GELU, layernorm — that zkLLM's own tlookup and zkAttn machinery exists specifically to handle at real, separately-measured cost. Matrix multiplication is the part of a transformer this technique cheapens; it's a large part, but not the part that makes real zkML systems expensive.
+
+#### 26c. The real cost of the full thing — inference is close, training isn't
+
+**Inference-only ZK proving is a real, cited, working result.** zkLLM (Sun, Li, Zhang; ACM CCS 2024) generates a correctness proof for a full 13-billion-parameter LLM's inference process in under 15 minutes, with a proof under 200KB, verifiable in 1–3 seconds — and the proof reveals nothing about the model's own weights. That's real, published, and independently reproduced across the sources checked for this section. It's also, by other researchers' own explicit assessment rather than this document's inference, still "prohibitively expensive for high-performance inference servers" — a direct, honest external judgment worth citing exactly rather than softened, because it's the field's own verdict on its own best current number.
+
+**Training-specific proving is a different, much larger gap.** zkLoRA (2025) measured real per-step proving time across six transformer LLMs — but the measurement is for one mini-batch consisting of a *single data sample*: 121.93 seconds (LLaMA-3.2-3B) to 249.38 seconds (OPT-13B), for one step, at the smallest possible batch size. A real pretraining run needs vastly more than one sample per step and vastly more than one step. Extrapolated illustratively — every assumption stated, not asserted as a real figure — even a deliberately conservative 50,000 steps (real frontier pretraining runs are widely reported to need far more) comes to:
+
+| model scale | proving time / step (real, cited) | 50,000 steps, sequential, mini-batch-of-1 |
+|---|---|---|
+| LLaMA-3.2-3B | 121.93s | ~70.6 days |
+| OPT-13B | 249.38s | ~144.3 days |
+
+— of proving alone, before accounting for real production batch sizes (hundreds to thousands of samples per step, not one) or the actual training compute itself. This isn't a strawman comparison invented to make the point look worse than it is; it's the field's own real numbers, extrapolated under a labeled, conservative assumption. The zkLLM ecosystem's own current assessment matches: full ZK proof of arbitrary gradient backpropagation and optimizer steps "remains substantially more expensive than inference-only ZKP," and even zkLoRA's own LoRA-style narrowing of what gets proven "partly mitigates but does not eliminate" that gap.
+
+**The trajectory is real too, and points toward "currently true," not "permanent."** Naive circuit-based ZK-ML approaches historically incurred more than 10× runtime overhead; newer commit-and-prove and parallel-accumulator techniques have brought that down substantially, and zkGPT reduces end-to-end proving for the much smaller GPT-2 to under 25 seconds. Inference-side proving has moved from clearly impractical toward "impressive but still too slow for production serving" in a few years — a trajectory this document has already seen once, in §7's batch-invariant-kernel cost dropping from 63% to ~2% over about the same span. Training-side proving hasn't made a comparable jump yet, and the field's own stated reason isn't an engineering backlog — it's that arbitrary backpropagation is a fundamentally larger circuit to prove correct than a forward pass, at every current technique's core.
+
+#### 26d. Answering §25's question, and one real idea worth naming rather than building
+
+Currently true, not permanent, and unevenly true across the two things this document has needed to verify. For inference specifically, "too inefficient" is trending toward "not yet practical for high-volume serving, but closing" — a real, cited, moving target. For training specifically, the gap remains large enough that the field's own current papers describe it as unsolved, not slow. §25's "resuming training" regime has no basis to assume ZK proof-of-training will be ready on any particular near-term timeline, and this document doesn't manufacture one.
+
+One idea worth naming precisely because it doesn't require resolving that gap first: ZK proving's real advantage isn't cheap *proving*, which stays expensive — it's cheap, sublinear, roughly-constant *verification*, which is already fast today (the 1–3 second zkLLM figure cited above). That property is worth spending on *rare, high-stakes* events even while proving remains too expensive for continuous use — §24's release decision, or a periodic checkpoint inside §25's Proof-of-Learning log, are exactly the kind of infrequent, consequential events where a prover paying minutes of proving cost once, in exchange for a verifier checking in seconds forever after, could be worth the asymmetry even today. Not built out here — it would need its own red-teaming, the same way every other mechanism in this document got one — but named as a real, connectable idea rather than treating this track as all-or-nothing against the architecture already built.
+
+#### Self-check
+
+Real, working piece built and tested, not just described: confirmed — Freivalds' algorithm, correctness confirmed, soundness checked against its actual proven bound (empirical rates matching theory to within noise at every trial count), and a real measured cost crossover reported honestly including where it initially runs backward. Cost figures are real citations, not estimates: confirmed — zkLLM's 13B/15-minute/200KB/1-3-second figures and zkLoRA's 121.93–249.38-second per-step figures both come from the papers directly, with the training-run extrapolation clearly labeled as illustrative under a stated, conservative assumption rather than presented as a real benchmark. §25's question answered directly, not deflected: confirmed — "currently true, unevenly, trending down for inference and not yet for training" is a specific claim, not a hedge.
+
+**Sources used in this section:** AI Futures Project, *AI 2040: Plan A*, Verification Plan supplement and "get involved" page (ai-2040.com/supplements/verification-plan) — the ~$100M cryptography-track funding figure and its framing as a parallel effort. Freivalds, "Probabilistic Machines Can Use Less Running Time" (IFIP 1979) — the algorithm this section builds and tests. Sun, Li, Zhang, "zkLLM: Zero Knowledge Proofs for Large Language Models" (ACM CCS 2024) — the 13B/15-minute/200KB/1–3-second inference figures. The zkLoRA/VeriLoRA papers (2025) — the real per-step training-proving figures this section's extrapolation is built from. §1, §5, §7, §25 (this document) — the recomputation cost-allocation baseline, and the batch-invariant-kernel cost trajectory this section's own "currently true, not permanent" framing is modeled on.
+
+---
+
+## Part VII — Holding Together
+
+### §27. Composing Trust Roots & Hardening
+
+The Verification Plan's own "get involved" page states this section's actual job more precisely than a paraphrase would: the open problem is proving that a combination of trust roots is sound — that a policy set actually enforces the independence between them it claims to, rather than quietly collapsing back to one. This document has built enough separate mechanisms by now (physical simplicity, TEE attestation, physical security, six reuses of one signing-key construction, and §26's not-yet-practical cryptographic track) that the question is no longer rhetorical. This section doesn't introduce a new mechanism. It checks the ones already built against each other, and reports what it actually finds — including inside this document's own prior work.
+
+#### 27a. A trust-root inventory, honestly categorized by what each one is actually trusting
+
+| mechanism | what it's actually trusted on |
+|---|---|
+| §2's passive splitter | physical simplicity — no logic to compromise, full stop |
+| §3's secure gateway | a TEE's attestation of its own boot-time firmware/software state |
+| §21's recomputation server | physical security (enclosure, debug-port placement) plus attestation |
+| §21b/§22/§23/§24/§25's tamper-evident logs | secrecy of a private signing key |
+| §26's ZK track | cryptographic soundness of the proof system, not yet practical at training scale |
+| §23's approval baseline | a human auditor's judgment, per the source material's own design |
+
+Six genuinely different bases for trust. Different bases is necessary for independence, but it isn't sufficient — two mechanisms can rest on different-sounding foundations and still share a hidden point of failure if they're wired together carelessly. That's the actual content of "quietly collapsing back to one," and the next subsection finds a real instance of it rather than describing the risk abstractly.
+
+#### 27b. The real finding: an audit of this document's own code, not a constructed example
+
+Auditing §24's `weight_transport.py` against the question this section is actually about turned up a genuine instance, not a hypothetical one. Its `__main__` block did this:
+
+```python
+auditor_key = Ed25519PrivateKey.generate()
+training_registry = ApprovalRegistry(auditor_key)      # §23's authority
+release_chain = ReleaseChain(auditor_key, training_registry)  # §24's authority
+```
+
+One key, instantiating both the §23 training-workload-approval authority and the §24 release authority. Neither `ApprovalRegistry` nor `ReleaseChain` is broken — both do exactly what §23 and §24 built and tested them to do. The bug is compositional: the document's own narrative clearly wants these to be independent decisions (a technical audit team confirming a training run stayed within declared bounds; a separate release process deciding whether to actually ship weights after evaluation), specifically so that one compromised or coerced party can't unilaterally clear both gates. Sharing a key erases that independence in code, even though the write-up never said it should.
+
+Tested directly, against the real classes, not a simplified stand-in:
+
+```
+1. Reproducing §24's ACTUAL setup: one key, two logically-distinct roles
+   Same key underneath both: True
+
+2. THE ATTACK: whoever compromises this ONE key can forge BOTH roles
+   Attacker forges a TRAINING APPROVAL using the compromised key: accepted=True
+   SAME attacker forges a RELEASE decision using the SAME compromised key: accepted=True
+   One compromise, both authorities defeated: True
+
+3. THE FIX, tested: independently generated keys per authority
+   Attacker compromises ONLY the release key (a narrower, more realistic breach)
+   Forging a RELEASE with the compromised release key: accepted=True
+   SAME attacker attempting to forge a TRAINING APPROVAL with the release key: accepted=False
+   PASS: the compromise stayed contained to the role whose key was actually stolen.
+```
+
+Fixed in the shipped file, not just in this section's demonstration — `weight_transport.py` now generates `training_auditor_key` and `release_auditor_key` independently, and every one of its five original tests (§24's full chain, the rejected-unapproved-release check, the shard-swap attack, the Merkle-proof efficiency check, and the tamper-on-the-release-log check) still passes unchanged, because the two authorities never actually needed to share a key for the mechanism's own logic — the sharing was pure convenience with no functional benefit, which made this a free fix: pure security gain, zero correctness cost. Worth being precise about what this does and doesn't prove: it's a real bug, caught, understood, and fixed in one specific, real instance. It is not evidence every remaining pairing in this document's own trust-root inventory is independent — only that this one was checked and wasn't.
+
+#### 27c. The other kind of shared root: physical, not cryptographic
+
+A different composition failure the same source material names directly: accelerator TEEs keep getting broken and patched, and side-channel or telemetry attacks that compromise a host machine tend to reach the accelerator it hosts too — meaning a "TEE-attested" trust root and a "this host is secure" trust root aren't actually independent either, for a physical rather than cryptographic reason. The source's own prescription is independent corroboration across power, timing, and network signals, so that one broken TEE doesn't take the whole verification story down with it.
+
+This document already built exactly that, in §18, before this section existed to name why it mattered at this level: a 2-of-3 correlation rule across power draw, NVLink utilization, and response timing, specifically justified there on the grounds that a real covert operation has physically-linked side effects across signal types that independent operational noise doesn't share. Re-used here rather than re-built, with its own honest limitation carried forward rather than left behind: §18's own self-check was explicit that no ground-truth attack dataset exists to validate detection rate against, so the bar it met was "concrete enough to test later," not "proven to work." Citing it again here doesn't upgrade that status — it's still the document's best current answer to physical-root independence, and still an unproven one.
+
+#### 27d. Hardening: hardcoded weights change the shape of the trust question, not just its strength
+
+A specific idea named in the source material worth reasoning through rather than building, since it's a hardware manufacturing concept no sandbox can fabricate: chips with weights physically hardcoded at manufacture time, so that "is this chip running the declared model" stops being an ongoing runtime question §5's whole DiFR apparatus exists to answer, and becomes a one-time question about what got fused into silicon before the chip ever shipped. That's a genuinely different trust-root *shape*, not a stronger version of the existing one — cheaper to check forever after (arguably free, if the hardware genuinely can't run anything else), at the cost of total inflexibility (no model updates, no multi-tenant serving on that silicon) and a complete transfer of trust onto the manufacturing and supply chain instead of onto runtime verification. §20 already named exactly why that transfer isn't free: supply-chain implants happen before a server ever reaches a facility, sealed in before any on-site audit or enclosure seal could exclude them — the same chain-of-custody problem this document has flagged before, now landing squarely on the one component a hardcoded-weights design would need to trust completely.
+
+#### 27e. Does the whole thing compose soundly? The honest answer, not a reassuring one
+
+No — not provably, and this section doesn't claim otherwise. The source material calls this an open problem, and one real, fixed instance of the failure it describes, found inside this document's own code, is evidence the discipline of actually checking works when applied — not evidence the rest of this document's trust-root pairings are independent by default. What §27 actually did: named six real bases for trust, found one real place two of them had quietly become one, fixed it, and carried forward — rather than resolved — the one physical-composition question this document already had a partial, honestly-caveated answer to. That's the accurate scope of "holding together" this section earns: checked where checked, not proven throughout.
+
+#### Self-check
+
+The composition failure is demonstrated against this document's own real code, not invented: confirmed — the shared-key setup is copied exactly from §24's actual `weight_transport.py`, the attack and fix are both tested against the real `ApprovalRegistry`/`TamperEvidentLog` classes, and the fix was applied to the shipped file itself, not left as a suggestion. The physical-composition question is connected to real prior work with its limitation intact, not upgraded: confirmed — §18's correlation rule is cited as this document's existing answer, with its own "not validated against ground truth" caveat repeated rather than dropped now that it's being reused for a new purpose. The section doesn't overclaim having solved what the source calls an open problem: confirmed — stated explicitly in 27e rather than implied away by ending on the fix in 27b.
+
+**Sources used in this section:** AI Futures Project, *AI 2040: Plan A*, Verification Plan supplement and "get involved" page (ai-2040.com/supplements/verification-plan) — the trust-root-independence framing and the TEE-hardening/hardcoded-weights material, both cited directly. §2, §3, §5, §18, §20, §21, §21b, §23, §24, §26 (this document) — every trust-root basis in the inventory, and the correlation-warden mechanism, all reused rather than restated from scratch.
+
+---
+
+### §28. Binding Verification to Governance
+
+The Verification Plan's own "get involved" page names this section's job precisely: the mapping between machine-checkable artifacts — receipts, audit trails — and the legal and treaty instruments coming online, things like conformity-assessment schemas, retention rules, and dispute resolution, plus the incremental path from unilateral declarations to a monitoring body to a treaty. Nothing through §27 has touched this. Every mechanism this document has built produces a technical finding; none of them says what that finding *means* to a body with authority to act on it. This section closes Part VII by building the one piece that's concretely buildable (28b), reasoning honestly through the piece that isn't (28c), and first, examining an analogy this document has leaned on since §20 without yet checking where it actually breaks.
+
+#### 28a. The IAEA analogy, examined rather than continued to be borrowed
+
+§20 modeled inspection cadence directly on IAEA safeguards concepts — Significant Quantity, Detection Probability, conversion time — and the parallel is real: both nuclear material and AI chips are dual-use, capital-intensive, and produced through a concentrated, choke-pointable supply chain. But a recent comparative analysis of hardware-level AI governance names two limits worth taking seriously rather than leaving implicit. First: nuclear material is radioactive and physically detectable at borders through passive means; AI chips aren't, which is exactly why §20's own power-envelope check had to substitute an indirect signal (grid draw) for something nuclear safeguards gets for free. Second, and more consequential for this section specifically: the IAEA operates entirely on the consent of signatory states and holds no unilateral enforcement authority of its own — any comparable body for AI would face the identical constraint. Every mechanism this document has built assumes a verifier with standing to check and a prover who submits to being checked. Neither assumption is a technical property; both are the treaty layer this section is actually about, and no amount of cryptography in §1–§27 supplies them.
+
+#### 28b. A conformity-assessment schema, tested against real prior results, not hypothetical ones
+
+The concrete, buildable piece: a mapping from the technical signals this document already produces to categories a dispute or enforcement process could actually act on — COMPLIANT, MINOR_DEVIATION, MATERIAL_BREACH, INCONCLUSIVE — with the reasoning for each category stated alongside it, not just a bare label. One override matters more than the deviation-based rule itself: if the evidentiary record's own tamper-log integrity check fails, the result is MATERIAL_BREACH *regardless of the deviation number*, because a compromised record can't support any finding, favorable or not. Tested directly rather than asserted — the same untampered result classified COMPLIANT; the identical claimed value, but with its logged record altered after signing, reclassified MATERIAL_BREACH even though nothing about the number itself changed:
+
+```
+Untampered log, avg_deviation=0.0: category=COMPLIANT
+Same claimed avg_deviation=0.0, but the record was altered after signing
+(tamper_log_valid=False): category=MATERIAL_BREACH
+```
+
+The more consequential test used real per-trial deviation data already produced in §11's calibration run — 120 real trials per model per temperature, not a hypothetical — classified at two different τ values:
+
+| model | temp | τ=0.3 (illustrative, uncalibrated) | τ=0.02 (§11's actual recommendation) |
+|---|---|---|---|
+| cross_family | 0.3 | 96.7% COMPLIANT | 7.5% COMPLIANT, 77.5% MATERIAL_BREACH |
+| cross_family | 0.8 | 99.2% COMPLIANT | 12.5% COMPLIANT, 49.2% MATERIAL_BREACH |
+| cross_family | 1.6 | 99.2% COMPLIANT | 17.5% COMPLIANT, 29.2% MATERIAL_BREACH |
+| same_family | 0.3–1.6 | 5–58% COMPLIANT | **0% COMPLIANT at every temperature — 100% MATERIAL_BREACH** |
+
+The gap between those two columns is the actual finding, and it's a sobering one: fed an uncalibrated τ, this schema would tell a dispute process that a genuinely dishonest model was legally compliant 97–99% of the time — not because the schema's logic is wrong, but because §9 already established τ=0.3 was never the calibrated figure to begin with, and a conformity-assessment layer inherits that upstream problem rather than fixing it. This section can build the mapping from technical signal to legal category. It cannot substitute for §11's calibration work being done correctly before that mapping is ever applied — a conformity schema is only as legally meaningful as the threshold it's handed.
+
+#### 28c. Dispute resolution: what the existing evidence actually settles, and what it can't
+
+Reasoned through rather than newly built, because the evidence a real dispute would turn on already exists in this document: §4's Merkle inclusion proofs let a disputed packet's payload be checked against an already-committed epoch root in O(log n), without needing to trust whoever's presenting it; §21b's hash-chained, signed log makes any post-hoc edit to a finding's own record detectable, which is exactly what 28b's override tests. Together, these settle a narrower question well: *given* the record wasn't altered after the fact, does the recomputed evidence match what's claimed. What they cannot settle is who gets to compel production of that evidence, what happens when a party disputes the verifier's *own* honesty rather than the prover's, or what remedy follows once a MATERIAL_BREACH finding is confirmed. Those are exactly the questions 28a's IAEA limitation names: a body with standing and (state-consented, not unilateral) authority to act, which this document's cryptography can inform but never substitute for.
+
+#### 28d. The incremental path, and what each stage actually needs from this document
+
+The source material's own staged path — unilateral declarations, then a monitoring body, then a treaty — maps cleanly onto pieces this document has already built at different points, worth naming explicitly rather than leaving as an abstract progression:
+
+| stage | what it needs from this document | what it doesn't need yet |
+|---|---|---|
+| Unilateral declaration | §13's DSL, §23's approval registry (self-reported, no external check) | §2's tap, §5's recomputation — nothing external verifies the declaration yet |
+| Monitoring body | Add §2–§14 (tap + DiFR), §15–§18 (completeness), §19–§22 (physical trust) — an external party now independently checks | Binding legal consequence — the monitoring body can observe and report, not yet compel |
+| Treaty | Add this section's conformity schema and 28c's dispute-resolution layer, backed by actual institutional authority | Nothing left in this document's own scope — everything past this point is the legal instrument itself |
+
+Read this way, the earlier parts of this document weren't just built in an arbitrary convenient order — they're a rough match for what each successive stage of that real, named progression would actually need, even though no single part of the source material laid the mapping out this explicitly.
+
+#### Self-check
+
+The IAEA analogy is examined, not just reused: confirmed — two specific, cited limitations (radioactive detectability, consent-based non-enforcement) named directly rather than left as an implicit, uninterrogated parallel this document has used since §20. The conformity schema is tested against real prior data, not invented inputs: confirmed — both the tamper-integrity override and the τ=0.3-vs-τ=0.02 comparison run against real per-trial arrays and real category means already produced by §9 and §11. The section doesn't overclaim what cryptography settles: confirmed — 28c states directly what the existing evidence can and can't resolve, and 28a's consent-based-authority limitation is carried through to 28c's conclusion rather than raised once and dropped.
+
+**Sources used in this section:** AI Futures Project, *AI 2040: Plan A*, Verification Plan supplement "get involved" page (ai-2040.com/supplements/verification-plan/get-involved) — the conformity-assessment/retention/dispute-resolution framing and the unilateral-declarations-to-treaty staged path, cited directly. "Hardware-Level Governance of AI Compute: A Feasibility Taxonomy for Regulatory Compliance and Treaty Verification" (arXiv:2604.04712) — the IAEA analogy's radioactive-detectability and consent-based-enforcement limitations. §3, §4, §9, §11, §20, §21b (this document) — the AUC-vs-accuracy metric-trap precedent, the Merkle-proof and tamper-log mechanisms, and the calibration finding this section's central test is built on, all reused rather than restated.
+
+---
+
+## Part VIII — Other Tracks
+
+### §29. Track 1 — Company/Domestic Auditing
+
+Worth naming plainly before anything else: this entire document, §1 through §28, has been Track 2. The source material's own breakdown of verification work into four parallel tracks (adapted from James Petrie) describes what this document built — passive optical taps, randomized recomputation, memory wiping, tamper-evident enclosures — as "options deployable before highly secure, purpose-built hardware exists," one track among several rather than the whole of the problem. Track 1 is a different bet entirely: domestic regulation or company-to-company agreements that "may not require any new verification technology" at all, justified by a real, stated claim — companies are less able to backdoor their own chips than nation-states, so embedded auditors together with existing hardware might already be enough. The named work for this track is specific: figure out the implementation details such a regime would need, and red-team its robustness. This section does the second half, against this document's own prior math rather than starting cold.
+
+#### 29a. A real framework this maps onto precisely
+
+AVERI (the AI Verification and Evaluation Research Institute, launched January 2026) publishes exactly the calibration this section needs: four AI Assurance Levels, from AAL-1 — limited access, similar to the third-party evaluations AI labs already commission — up to AAL-4, "treaty grade" assurance sufficient for international agreements. AVERI's own distinction between the levels is precise and worth stating exactly rather than paraphrased into something vaguer: at lower levels, auditors rely more heavily on information the company itself provides; at the highest level, auditors can rule out the possibility of materially significant deception by the auditee. That's the honest axis Track 1 sits on. This document's Track 2 architecture — §2's physically-tamper-resistant splitter, §5's independent recomputation, §21b's cryptographic tamper evidence — was built specifically to reach something like AAL-4 without relying on the audited party's own cooperation for the parts that matter most. Track 1 explicitly isn't trying to reach that bar; it's asking how much real assurance a much cheaper, much faster-to-deploy regime can still buy.
+
+#### 29b. Red-teaming the actual claim, with this document's own math
+
+§22 already built and verified the relevant machinery: a Poisson-process model connecting how often an auditor actually checks something to how likely a real violation is to be caught. That model doesn't care whether the "auditor" is an internationally-sampled quarterly visit to one of a thousand facilities or a single company's own embedded reviewer — the input that matters is the rate, λ. Reusing §22's functions directly, with one changed input:
+
+| regime | λ (checks/year) | P(caught), 1-week bypass | P(caught), 1-month bypass |
+|---|---|---|---|
+| Track 2 baseline (§22's quarterly, 10%-sampled international regime) | 0.40 | 0.0076 | 0.0323 |
+| Track 1, monthly embedded review | 12.0 | 0.2056 | 0.6270 |
+| Track 1, weekly embedded review | 52.0 | 0.6311 | 0.9861 |
+| Track 1, daily embedded presence | 365.0 | 0.9991 | 1.0000 |
+
+And expected time-to-discovery for a sealed (tamper-evident) bypass, formula checked against real simulation rather than trusted alone:
+
+| regime | formula (days) | Monte Carlo (days) |
+|---|---|---|
+| Track 2 baseline | 912.5 | 913.6 |
+| Track 1, monthly | 30.4 | 30.3 |
+| Track 1, weekly | 7.0 | 7.0 |
+| Track 1, daily | 1.0 | 1.0 |
+
+The claim holds up, as far as cadence alone goes. Monthly embedded review — a real, achievable cadence for a single company's own compliance function, not a fleet-wide sampling program — cuts expected discovery time roughly 30×, with none of §2–§4's purpose-built hardware. Daily presence cuts it roughly 900×. This is exactly why "embedded auditors... might be able to reach sufficient assurance" is a plausible claim and not just an aspirational one: it's §22's own trusted math, landing very differently once fed Track 1's actual access model instead of Track 2's.
+
+#### 29c. What cadence doesn't fix, stated as precisely as the improvement above was
+
+Every number in 29b assumes an auditor's cadence converts directly into a real chance of catching a real violation — exactly true for §22's physical tap, which mechanically mirrors every packet crossing it with no discretion about what it sees, and NOT automatically true for a human auditor. A human auditor, embedded or not, sees what they're shown, or what they think to check. AVERI's own framework names this precisely: lower assurance levels rely on company-provided information, and the honest distinction between "daily embedded presence" and "daily embedded presence with the kind of access §2's splitter has by physical construction" is exactly the gap between AAL-2-ish and AAL-4, one the Poisson-process math above cannot see, because cadence was never the variable that question turns on. AVERI names a second, compounding real-world difficulty worth carrying forward rather than treating as separate: the auditors capable of doing this well are scarce, and often drawn toward the very companies they'd be auditing — a recruitment and independence problem no amount of on-paper cadence improves.
+
+#### 29d. What Track 1 can honestly borrow from Track 2, and what it can't
+
+Can: §21b's tamper-evident log construction, reused seven times in this document now, needs no exotic hardware at all — an embedded auditor's own findings, signed and hash-chained, get the identical tamper-evidence property §22's tap registry and §23's approval registry already have, at essentially zero marginal engineering cost. Cannot: anything that depends on §2's physical-simplicity trust argument or §3's TEE-rooted attestation, because both exist specifically to remove the audited party's own cooperation from the trust chain — the exact thing Track 1 is choosing to accept rather than engineer around, in exchange for speed and cost this document's Track 2 architecture never optimized for.
+
+#### Self-check
+
+The comparison reuses real, already-verified math rather than inventing new numbers: confirmed — every figure in 29b comes directly from §22's own `tap_inspection_model.py` functions, called with a changed input, with the sealed-case numbers checked against real Monte Carlo simulation rather than the formula alone. The section names what its own central comparison can't show, not just what it can: confirmed — 29c states directly that cadence and access-discretion are different variables, and that the reused math only ever modeled the first one. Grounded in a real, current external framework rather than this document's own invented categories: confirmed — AVERI's AAL-1-through-4 structure is cited precisely, including its own stated basis for the distinction (company-provided information vs. ruling out deception), not paraphrased into something looser.
+
+**Sources used in this section:** AI Futures Project, *AI 2040: Plan A*, Verification Plan supplement "get involved" page (ai-2040.com/supplements/verification-plan/get-involved) — the four-tracks breakdown (adapted from James Petrie) and Track 1's own stated justification. AVERI, "Frontier AI Auditing: Toward Rigorous Third-Party Assessment of Safety and Security Practices at Leading AI Companies" (averi.org, 2026) — the AI Assurance Level framework and the auditor-recruitment difficulty. §2, §21b, §22, §23 (this document) — the physical-simplicity trust argument, the tamper-evident log, and the Poisson-process detection model, all reused rather than rebuilt.
+
+---
+
+### §30. Track 3 — Detecting Undeclared Compute
+
+The Verification Plan supplement's own name for this problem is worth using exactly rather than the more totalizing framing "detecting undeclared compute" invites: **Problem 2, verifying that unknown compute is inconsequential.** Not finding all of it. The supplement's own covert-project supplement estimates a median of about 0.5% of the world's AI-relevant compute (80% CI: 0.1% to 1.4%) as plausible "dark compute" at the start of a deal — small enough, on the source's own numbers, to not threaten the deal's basic viability, and expected to shrink further as detection accumulates. Track 2 (§1–§28) and Track 1 (§29) both assume the facility in question is at least physically known, even where its honesty isn't trusted. Track 3 is the one case that assumption fails, and it's the last piece of this document.
+
+#### 30a. The same move, confirmed as the source's own frame, not this document's invention
+
+This document has made one particular epistemic move repeatedly enough that it's worth naming as a pattern rather than a coincidence: §1 scoped completeness to "nothing unapproved persists or leaves the cluster as output," explicitly narrower than "prove idle cycles are never touched." §4 argued a hash-only commitment is the right answer because the honest comparison was never "record everything" — it was "record something vs. record nothing." §12 computed a real bit-capacity bound for steganographic leakage rather than claiming zero channel capacity. §17 targeted residual side-channel capacity to match what the system already tolerated elsewhere, not to reach zero. §22 quantified a bypass-and-restore residual risk it explicitly declined to solve away. Every one of those is the same underlying move: bound a risk precisely, rather than claim to eliminate it. Track 3's own source material frames its hardest, least tractable-sounding problem — compute nobody declared existing at all — with exactly that same move. That's not this document reaching for a comfortable frame at the end; it's confirmation, on the last section, that the frame it kept returning to was the source material's own, not a coping mechanism invented along the way.
+
+#### 30b. Verifying the fab-concentration argument, not just citing it
+
+The source's structural reason dark compute should stay small: chip production runs through a small number of highly controlled fabs, and at sustained 3x/year production growth, "every 2 years 90% of the fabs are new fabs" — meaning diversion has to be caught early and often, against a supply chain that's mostly brand-new at any given moment. Checked directly rather than trusted: under 3×/year growth, the fraction of all cumulative capacity built in the most recent 2 years computes to 88.9%, matching the source's "~90%" closely — and it converges to that exact figure (1 − 3⁻² = 8/9) regardless of how many total years the model runs, confirmed by checking convergence across 5, 10, 20, and 40-year horizons rather than trusting one computed number. This is a real, structural property of sustained exponential growth, not an estimate the source pulled from elsewhere.
+
+#### 30c. Bounding detectability by size, against a demonstrated capability — not a hypothetical one
+
+Reusing §20's own power-envelope function for a new purpose: given a covert facility's size in GPUs, what facility power draw would it need. The honest anchor for whether that draw is detectable isn't hypothetical — SatVu, a real company, published a satellite thermal image in December 2025 clearly resolving the waste-heat signature of a real, named 700MW datacenter (the Riot Platforms Bitcoin-mining facility in Rockdale, Texas) at 3.5-meter resolution, from orbit. A covert operation at §20's own reference-facility scale — 5,702 GPUs — draws about 5MW, roughly 140× smaller than that demonstrated case. That is *not* evidence such a facility would stay hidden. A smaller heat signature is a real physical fact working against the defender too, and this document doesn't have the actual sensor's noise floor — only its best-case published resolution — so it states the real question precisely rather than resolving it in either direction: not "can waste heat be seen from orbit" (demonstrated, yes), but "at what scale does an AI-specific covert facility's signature clear a real sensor's real noise floor," which needs a number this document doesn't have.
+
+One more real connection worth making explicit: taking the source's own 0.5%-of-world-compute median estimate and hypothetically concentrating it into a single facility comes to roughly 4,077MW — comparable to, and larger than, the 700MW case SatVu already resolved. That's exactly why the source's own mitigating detail matters as much as its headline number: the estimate assumes dark compute is spread across many smaller, individually-harder-to-resolve sites, not concentrated. Concentrated, the source's own median case is plausibly *more* visible than something already demonstrated as detectable. Spread thin, it isn't. The size of the number was never the whole claim; its distribution is load-bearing too, and this document's own math is what makes that visible rather than something to take on faith.
+
+#### 30d. What this document's architecture contributes anyway, and where it stops completely
+
+Nothing in §1–§29 was built to find a facility nobody declared — every mechanism from the tap onward assumes a facility that's at least physically present and knowable, even where its honesty is the whole question. But two pieces already built serve Track 3's purpose without having been designed for it: §20's inventory cross-checking (satellite imagery, import and customs records, §2's own network-visible device fingerprinting where a facility already has taps installed) doesn't require trusting a facility's own paperwork, which is exactly the property Track 3 needs for a facility that never filed any paperwork at all. And §13's checkpoint-hash-tied approval registry means legitimately-acquired chips accumulate a real, growing paper trail of what they were approved to run — a chip that never shows up in that trail anywhere is exactly the kind of gap an inventory audit is built to notice, even without knowing in advance where to look for it physically.
+
+Where this document's architecture stops completely, stated as plainly as everywhere else it's stopped: a tap can't tap a network nobody told you exists. Everything through §29 verifies a claim against a check; Track 3 is about facilities that never made a claim to check against in the first place. That's not a gap this document's tools can close with more careful engineering — it's a different discipline (intelligence, not audit), named honestly as outside this document's own reach rather than gestured at with a mechanism that doesn't actually apply.
+
+#### Self-check
+
+The reframe from "detect everything" to "bound and verify inconsequential" is the source material's own, not this document's rhetorical move at the end: confirmed — cited directly, including the real quantified estimate it rests on. Both real, checkable claims in this section were actually checked, not just cited: confirmed — the fab-concentration figure computed to 88.9% against a "~90%" claim, with the exact closed form found and verified across multiple time horizons; the detectability comparison is anchored to a real, named, recently-demonstrated satellite result, not a hypothetical capability. The section states precisely what it can't resolve rather than picking a comforting default: confirmed — 30c explicitly declines to conclude either "detectable" or "hidden" for the reference-facility case, naming the specific missing number (real sensor noise floor) rather than filling the gap with an assumption.
+
+**Sources used in this section:** AI Futures Project, *AI 2040: Plan A*, Verification Plan supplement (ai-2040.com/supplements/verification-plan) — the "verifying unknown compute is inconsequential" framing, the 0.5%-median/0.1–1.4%-CI dark-compute estimate, and the fab-concentration argument, all cited directly. SatVu / Space.com, "Satellites reveal heat leaking from largest US cryptocurrency mining center" (December 2025) — the real, demonstrated 700MW/3.5m thermal-detection result this section's size comparison is anchored to. §1, §2, §4, §12, §13, §17, §20, §22 (this document) — the completeness scoping, the hash-commitment reasoning, the bit-capacity bound, the residual-capacity targeting, the inventory cross-check, and the checkpoint-hash approval trail, all reused rather than re-derived, in what turns out to be this document's own closing argument as much as its source material's.
+
+---
+
+## Closing note
+
+Thirty sections, drafted the way §1 said they would be: real code where this sandbox could support it, honest labeling where it couldn't, bugs found and fixed rather than smoothed over, and — a discipline that only fully paid off by being applied consistently rather than selectively — real sources checked at the point they were needed rather than assumed from memory, which is exactly what turned §23 through §30 from reasonable guesses into a document actually grounded in what the Verification Plan supplement says, sentence by sentence, rather than in what seemed like a plausible thing for it to say.
+
+The document's own opening line about what "checkable" means in this sandbox held up across all thirty sections, not just the early ones where it was easy: no GPU, one logical CPU, no DPDK-capable NIC, no optical tap hardware, and — as of this section — no satellite. Where that meant a claim had to stay a design estimate instead of a measurement, it's labeled that way throughout, including here, in the section that closes it.
+
+This isn't a finished verification system, and was never going to be one from a sandbox. It's thirty sections of honest work toward finding out how much of a real proposal survives contact with actually trying to build it.
