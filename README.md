@@ -53,6 +53,10 @@ Every section of [`ai-2040-verification.md`](./ai-2040-verification.md) follows 
 
 Sandbox constraints (no GPU, no reachable path to pretrained weights, one logical CPU, ~5GB free disk) are stated explicitly wherever they bound a result, rather than smoothed over.
 
+## Related repository: infrastructure and physical evidence
+
+[`AnonRish/continental-load-registry`](https://github.com/AnonRish/continental-load-registry) is a complementary public-data research repository. It focuses on the infrastructure/accounting side of the problem: large-load and interconnection records, Epoch AI data-center cross-references, physical/remote-sensing observations, and explicit research/provenance workflows. This repository focuses on concrete verification mechanisms such as inference recomputation, passive network observation, red-teaming, and operational trust. Neither repository by itself constitutes an international verification system or a certification of Plan A.
+
 ## Architecture
 
 <img src="./docs/architecture.svg" alt="System topology: storage bank, inference units, passive optical splitter, trust boundary, recomputation server" width="620">
