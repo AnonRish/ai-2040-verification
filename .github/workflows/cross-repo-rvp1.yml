@@ -37,7 +37,7 @@ jobs:
         working-directory: deps/continental-load-registry
         run: |
           python -m pip install pytest
-          python -m pytest tests/test_track3_bound.py -q
+          python -m pytest tests/test_track3_bound.py tests/test_track3_tail_audit.py tests/test_closure.py -q
           python track3_bound.py --input data/track3/residual_bound_input.example.json >/tmp/track3-result.json
       - name: Cross-repo contract
         run: |
