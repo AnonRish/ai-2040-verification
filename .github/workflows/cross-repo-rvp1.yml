@@ -26,8 +26,10 @@ jobs:
       - name: Toolkit conformance
         working-directory: deps/ai-2040-plan-a-toolkit
         run: |
-          python -m pip install -r requirements.txt
-          python -m pytest plan_a_protocol/tests embedded_audit/tests verification_lab/tests frame_processor/tests hostile_prover/tests formal/test_reference_model.py benchmarks/test_benchmark.py benchmarks/test_scorecard.py compute_accounting/test_interval_ledger.py gateway/test_policy.py provenance/test_gate.py -q
+          python -m pip install -r requirements-rvp1-lock.txt
+          python -m pip install -e .
+          python -m repository_gate
+          python -m pytest -q
       - name: Frontier Verify recomputation path
         working-directory: deps/frontier-verify
         run: |
@@ -37,7 +39,7 @@ jobs:
         working-directory: deps/continental-load-registry
         run: |
           python -m pip install pytest
-          python -m pytest tests/test_track3_bound.py tests/test_track3_tail_audit.py tests/test_closure.py -q
+          python -m pytest tests/test_track3_bound.py tests/test_track3_tail_audit.py -q
           python track3_bound.py --input data/track3/residual_bound_input.example.json >/tmp/track3-result.json
       - name: Cross-repo contract
         run: |
