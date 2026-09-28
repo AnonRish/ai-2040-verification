@@ -169,3 +169,8 @@ No license has been chosen yet, which by default means **all rights reserved** �
 | **CC-BY-4.0** | Fits the write-up (`ai-2040-verification.md`) better than the code if the document itself is the primary thing being shared — requires attribution, allows reuse. |
 
 GitHub can add most of these for you: **Settings → General → Add a license file**.
+
+
+## Current Plan A track integration
+
+The detailed 30-section research notebook is now connected to executable track-specific prototypes in the companion repositories. See PLAN_A_TRACK_INTEGRATION.md for the current cross-repository map and the exact software-vs-external validation boundary.
