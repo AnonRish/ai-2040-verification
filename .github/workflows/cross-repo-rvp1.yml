@@ -21,13 +21,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: AnonRish/continental-load-registry
-          ref: f7bcbeaa0e03d9bfeaae349bf947de0a8ae38374
+          ref: e458fe02255c929883c516ab5d2441d355f202bb
           path: deps/continental-load-registry
       - name: Assert pinned snapshots
         run: |
           test "$(git -C deps/ai-2040-plan-a-toolkit rev-parse HEAD)" = "1968cd35b54614254bd68a586847e1d88dd4ade9"
           test "$(git -C deps/frontier-verify rev-parse HEAD)" = "1361644cb6f860b05bcbbacea79f42f28ec36c29"
-          test "$(git -C deps/continental-load-registry rev-parse HEAD)" = "f7bcbeaa0e03d9bfeaae349bf947de0a8ae38374"
+          test "$(git -C deps/continental-load-registry rev-parse HEAD)" = "e458fe02255c929883c516ab5d2441d355f202bb"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

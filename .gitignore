@@ -12,6 +12,7 @@ venv/
 shakespeare.txt
 vocab.pkl
 tau.txt
+.artifacts
 
 # OS cruft
 .DS_Store
